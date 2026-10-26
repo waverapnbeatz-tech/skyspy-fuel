@@ -1,0 +1,27 @@
+{
+  "stations": [
+    {
+      "id": "kontakt_turnov",
+      "name": "Kontakt Turnov",
+      "location": "Turnov, Svobodova 2050",
+      "source_kind": "mbenzin",
+      "expected_address": "Svobodova 2050",
+      "url": "https://www.mbenzin.cz/Ceny-benzinu-a-nafty/Turnov/Kontakt-Svobodova-2050/17039"
+    },
+    {
+      "id": "robinoil_turnov",
+      "name": "RobinOil Turnov",
+      "location": "Turnov, Palackého 182",
+      "source_kind": "mbenzin",
+      "expected_address": "Palackého 182",
+      "url": "https://www.mbenzin.cz/Ceny-benzinu-a-nafty/Turnov/Robin-Oil-Palackeho-182/18270"
+    },
+    {
+      "id": "ono_cvikov",
+      "name": "Tank ONO Cvikov",
+      "location": "Cvikov",
+      "source_kind": "ono",
+      "url": "https://m.tank-ono.cz/cz/index.php?ind=30&page=pumpcard"
+    }
+  ]
+}

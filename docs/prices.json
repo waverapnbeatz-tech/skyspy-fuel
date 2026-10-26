@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "generated_at": null,
+  "timezone": "Europe/Prague",
+  "unit": "Kč/l",
+  "stations": [
+    {"id":"kontakt_turnov","name":"Kontakt Turnov","location":"Turnov, Svobodova 2050","source_url":"https://www.mbenzin.cz/Ceny-benzinu-a-nafty/Turnov/Kontakt-Svobodova-2050/17039","source_kind":"mbenzin","checked_at":null,"natural95":{"price":null,"reported_date":null,"status":"missing"},"diesel":{"price":null,"reported_date":null,"status":"missing"},"error":null},
+    {"id":"robinoil_turnov","name":"RobinOil Turnov","location":"Turnov, Palackého 182","source_url":"https://www.mbenzin.cz/Ceny-benzinu-a-nafty/Turnov/Robin-Oil-Palackeho-182/18270","source_kind":"mbenzin","checked_at":null,"natural95":{"price":null,"reported_date":null,"status":"missing"},"diesel":{"price":null,"reported_date":null,"status":"missing"},"error":null},
+    {"id":"ono_cvikov","name":"Tank ONO Cvikov","location":"Cvikov","source_url":"https://m.tank-ono.cz/cz/index.php?ind=30&page=pumpcard","source_kind":"ono","checked_at":null,"natural95":{"price":null,"reported_date":null,"status":"missing"},"diesel":{"price":null,"reported_date":null,"status":"missing"},"error":null}
+  ]
+}
