@@ -2,11 +2,14 @@
   "stations": [
     {
       "id": "kontakt_turnov",
-      "name": "Kontakt Turnov",
-      "location": "Turnov, Svobodova 2050",
+      "name": "Kontakt Ohrazenice",
+      "location": "Turnov – Ohrazenice, Průmyslová 3002",
       "source_kind": "mbenzin",
-      "expected_address": "Svobodova 2050",
-      "url": "https://www.mbenzin.cz/Ceny-benzinu-a-nafty/Turnov/Kontakt-Svobodova-2050/17039"
+      "expected_address": "Ohrazenice",
+      "url": "https://www.mbenzin.cz/Ceny-benzinu-a-nafty/Turnov/Kontakt-Ohrazenice/17038",
+      "listing_address": "Turnov, Ohrazenice",
+      "listing_name": "Kontakt",
+      "fallback_url": "https://www.mbenzin.cz/Ceny-benzinu-a-nafty/Turnov"
     },
     {
       "id": "robinoil_turnov",
@@ -14,7 +17,10 @@
       "location": "Turnov, Palackého 182",
       "source_kind": "mbenzin",
       "expected_address": "Palackého 182",
-      "url": "https://www.mbenzin.cz/Ceny-benzinu-a-nafty/Turnov/Robin-Oil-Palackeho-182/18270"
+      "url": "https://www.mbenzin.cz/Ceny-benzinu-a-nafty/Turnov/Robin-Oil-Palackeho-182/18270",
+      "listing_address": "Turnov, Palackého 182",
+      "listing_name": "Robin Oil",
+      "fallback_url": "https://www.mbenzin.cz/Ceny-benzinu-a-nafty/Turnov"
     },
     {
       "id": "ono_cvikov",

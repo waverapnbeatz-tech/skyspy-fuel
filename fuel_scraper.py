@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -44,6 +45,9 @@ def reported_date(text: str, now: datetime) -> date | None:
         return now.date() - timedelta(days=1)
     if re.search(r"\bdnes\b", t):
         return now.date()
+    relative = re.search(r"\b(\d{1,3})\s*dn[ií]\b", t)
+    if relative:
+        return now.date() - timedelta(days=int(relative.group(1)))
     m = DATE_PATTERN.search(text)
     if m:
         try:
@@ -73,33 +77,85 @@ def text_lines(html: str) -> list[str]:
     return [s.strip() for s in soup.get_text("\n", strip=True).splitlines() if s.strip()]
 
 
+def normalized(text: str) -> str:
+    """Case/diacritics/punctuation insensitive comparison for Czech station addresses."""
+    plain = "".join(c for c in unicodedata.normalize("NFKD", text.casefold())
+                    if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", " ", plain).strip()
+
+
+def fuel_label(line: str) -> str | None:
+    """Allow both a heading (Benzín) and an inline label (Benzín 44,50)."""
+    n = normalized(line)
+    for label in ("Premium benzín", "Premium diesel", "Benzín", "Nafta", "LPG", "CNG"):
+        ln = normalized(label)
+        if n == ln or n.startswith(ln + " "):
+            return label
+    return None
+
+
+def fuel_record_from_lines(lines: list[str], label: str, now: datetime) -> dict:
+    positions = [i for i, item in enumerate(lines) if fuel_label(item) == label]
+    if len(positions) != 1:
+        raise ValueError(f"Sekce {label} nenalezena jednoznačně (nalezeno {len(positions)})")
+    idx = positions[0]
+    end = next((j for j in range(idx + 1, min(idx + 9, len(lines)))
+                if fuel_label(lines[j])), min(idx + 9, len(lines)))
+    area = " ".join(lines[idx:end])
+    try:
+        price = validate_price(area)
+    except ValueError:
+        return record()
+    # Datums may be explicit or relative. No date => unknown_date, never fresh.
+    d = reported_date(area, now)
+    return record(price, d, now)
+
+
 def parse_mbenzin(html: str, now: datetime, expected_address: str) -> tuple[dict, dict]:
     lines = text_lines(html)
-    full = " ".join(lines)
-    if expected_address.casefold() not in full.casefold():
-        raise ValueError(f"Nesedí adresa stanice: {expected_address}")
-    # Stop BEFORE nearby stations: never use a neighboring station's price.
-    first_nearby = next((i for i, s in enumerate(lines) if s.casefold() in (
-        "čerpací stanice v okolí", "cerpaci stanice v okoli")), len(lines))
+    first_nearby = next((i for i, s in enumerate(lines) if normalized(s) ==
+                         "cerpaci stanice v okoli"), len(lines))
     own = lines[:first_nearby]
-    out = []
-    for label in ("Benzín", "Nafta"):
-        positions = [i for i, s in enumerate(own) if s.casefold() == label.casefold()]
-        if len(positions) != 1:
-            raise ValueError(f"Sekce {label} nenalezena jednoznačně (nalezeno {len(positions)})")
-        idx = positions[0]
-        # Price may be split into multiple text nodes. Stop at the next section.
-        end = next((j for j in range(idx + 1, min(idx + 12, len(own)))
-                    if own[j] in FUEL_LABELS), min(idx + 12, len(own)))
-        area = " ".join(own[idx + 1:end])
-        try:
-            price = validate_price(area)
-        except ValueError:
-            out.append(record())
+    first_fuel = next((i for i, s in enumerate(own) if fuel_label(s) == "Benzín"), len(own))
+    # Check address in the station header, not in nearby station recommendations.
+    header = normalized(" ".join(own[:first_fuel]))
+    if normalized(expected_address) not in header:
+        raise ValueError(f"Nesedí adresa stanice v hlavičce: {expected_address}")
+    return (fuel_record_from_lines(own, "Benzín", now),
+            fuel_record_from_lines(own, "Nafta", now))
+
+
+def parse_mbenzin_listing(html: str, now: datetime, address: str, station_name: str) -> tuple[dict, dict]:
+    """Safely extract one exact station from the city list, never its neighbor."""
+    lines = text_lines(html)
+    addr = normalized(address)
+    name = normalized(station_name)
+    candidates = [i for i, s in enumerate(lines)
+                  if normalized(s) == addr and name in [normalized(v) for v in lines[max(0, i-4):i]]]
+    if not candidates:
+        raise ValueError(f"Stanice {station_name}, {address} není v přehledu jednoznačně nalezena")
+    parsed = []
+    for i in candidates:
+        # Each city's row always ends at 'Premium diesel'. Do not bleed into another row.
+        end = next((j + 1 for j in range(i+1, min(i+46, len(lines)))
+                    if fuel_label(lines[j]) == "Premium diesel"), None)
+        if end is None:
             continue
-        d = reported_date(area[:130], now)
-        out.append(record(price, d, now))
-    return out[0], out[1]
+        block = lines[i+1:end]
+        try:
+            b = fuel_record_from_lines(block, "Benzín", now)
+            d = fuel_record_from_lines(block, "Nafta", now)
+            if b["price"] is not None or d["price"] is not None:
+                parsed.append((b, d))
+        except ValueError:
+            continue
+    if not parsed:
+        raise ValueError(f"Stanice {station_name}, {address}: ceny v přehledu nenalezeny")
+    # Repeated blocks are acceptable only if they agree (not mixed station prices).
+    distinct = {(x["price"], y["price"]) for x,y in parsed}
+    if len(distinct) != 1:
+        raise ValueError("Rozdílné ceny stejné stanice ve více sekcích přehledu")
+    return parsed[0]
 
 
 def parse_ono(html: str, now: datetime) -> tuple[dict, dict]:
@@ -160,7 +216,26 @@ def fetch_station(station: dict, now: datetime, session: requests.Session) -> di
         if len(response.content) > 2_000_000:
             raise ValueError("Příliš velká odpověď")
         if station["source_kind"] == "mbenzin":
-            n95, diesel = parse_mbenzin(response.text, now, station["expected_address"])
+            try:
+                n95, diesel = parse_mbenzin(response.text, now, station["expected_address"])
+                if n95["price"] is None and diesel["price"] is None:
+                    raise ValueError("Detail neobsahuje ceny")
+            except ValueError as detail_error:
+                # Use the precise city-list entry only; never scrape a neighboring station.
+                fallback_url = station.get("fallback_url")
+                if not fallback_url or not station.get("listing_address") or not station.get("listing_name"):
+                    raise
+                if not robots_allowed(session, fallback_url):
+                    raise RuntimeError("robots.txt nepovoluje přehled stanic") from detail_error
+                listing = session.get(fallback_url, headers=HEADERS, timeout=(10, 20))
+                listing.raise_for_status()
+                if len(listing.content) > 2_000_000:
+                    raise ValueError("Příliš velká odpověď přehledu") from detail_error
+                try:
+                    n95, diesel = parse_mbenzin_listing(
+                        listing.text, now, station["listing_address"], station["listing_name"])
+                except ValueError as listing_error:
+                    raise ValueError(f"Detail: {detail_error}; přehled: {listing_error}") from listing_error
         elif station["source_kind"] == "ono":
             n95, diesel = parse_ono(response.text, now)
         else:

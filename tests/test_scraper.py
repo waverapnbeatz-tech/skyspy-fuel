@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from fuel_scraper import parse_mbenzin, parse_ono, validate_price, reported_date, freshness
+from fuel_scraper import parse_mbenzin, parse_mbenzin_listing, parse_ono, validate_price, reported_date, freshness
 
 NOW = datetime(2026, 10, 26, 18, 0, tzinfo=ZoneInfo('Europe/Prague'))
 
@@ -13,7 +13,50 @@ MBENZIN = '''<html><body><header>Najít nejlevnější benzín</header><h1>Konta
 ONO = '''<body><h1>Cvikov</h1><p>NATURAL 95</p><span>42<sup>90</sup></span><p>1<sup>780</sup></p>
 <p>NATURAL 95+</p><span>43<sup>50</sup></span><p>DIESEL</p><span>45<sup>90</sup></span><p>1<sup>905</sup></p><p>DIESEL+</p><span>46<sup>50</sup></span></body>'''
 
+
+MBENZIN_OHRAZENICE = """<html><body><h1>Kontakt</h1><h2>Turnov</h2><div>Ohrazenice</div><h2>Benzín</h2>
+<div>43,90 Kč 25.10.2026</div><h2>Nafta</h2><div>46,90 Kč 8 dní</div><h2>Premium benzín</h2>
+<div>45,90</div><h2>Čerpací stanice v okolí</h2><div>Kontakt Turnov, Svobodova 2050</div>
+<div>Benzín 41,00</div><div>Nafta 41,50</div></body></html>"""
+MBENZIN_LISTING = """<html><body><main><h2>Nejbližší</h2>
+<a>Robin Oil</a><div>Turnov, Palackého 182</div><div>CCS</div><div>200 m</div>
+<div>Benzín</div><b>44,50</b><div>Nafta</div><b>46,70</b><div>LPG</div><div>–</div>
+<div>CNG</div><div>–</div><div>Premium benzín</div><div>47,50</div><div>Premium diesel</div><div>–</div>
+<a>Kontakt</a><div>Turnov, Svobodova 2050</div><div>Benzín</div><b>43,90</b>
+<div>Nafta</div><b>46,90</b><div>LPG</div><div>22,90</div><div>CNG</div><div>45,90</div>
+<div>Premium benzín</div><div>45,90</div><div>Premium diesel</div><div>47,90</div>
+<a>Kontakt</a><div>Turnov, Ohrazenice</div><div>CCS</div><div>1,50 km</div>
+<div>Benzín</div><b>43,90</b><div>Nafta</div><b>46,90</b><span>8 dní</span>
+<div>LPG</div><div>22,90</div><div>CNG</div><div>–</div><div>Premium benzín</div><b>45,90</b><div>Premium diesel</div><div>47,90</div>
+</main></body></html>"""
+
 class ParserTests(unittest.TestCase):
+    def test_ohrazenice_detail_guard(self):
+        n95, diesel = parse_mbenzin(MBENZIN_OHRAZENICE, NOW, 'Ohrazenice')
+        self.assertEqual(n95['price'], 43.9)
+        self.assertEqual(diesel['price'], 46.9)
+        self.assertEqual(diesel['status'], 'stale')
+        with self.assertRaises(ValueError):
+            parse_mbenzin(MBENZIN_OHRAZENICE, NOW, 'Svobodova 2050')
+    def test_ohrazenice_listing(self):
+        b, d = parse_mbenzin_listing(MBENZIN_LISTING, NOW, 'Turnov, Ohrazenice', 'Kontakt')
+        self.assertEqual(b['price'], 43.9)
+        self.assertEqual(d['price'], 46.9)
+        self.assertEqual(d['status'], 'stale')
+    def test_robinoil_listing(self):
+        b, d = parse_mbenzin_listing(MBENZIN_LISTING, NOW, 'Turnov, Palackého 182', 'Robin Oil')
+        self.assertEqual(b['price'], 44.5)
+        self.assertEqual(d['price'], 46.7)
+    def test_listing_never_neighbor(self):
+        with self.assertRaises(ValueError):
+            parse_mbenzin_listing(MBENZIN_LISTING, NOW, 'Turnov, Neexistující 123', 'Kontakt')
+    def test_ohrazenice_config(self):
+        from pathlib import Path
+        import json
+        cfg = json.loads(Path('config/stations.json').read_text(encoding='utf-8'))
+        kontakt = cfg['stations'][0]
+        self.assertEqual(kontakt['id'], 'kontakt_turnov')  # keep Android compatibility
+        self.assertTrue(kontakt['url'].endswith('/17038'))
     def test_mbenzin_prices_and_dates(self):
         n95, diesel = parse_mbenzin(MBENZIN, NOW, 'Svobodova 2050')
         self.assertEqual(n95['price'], 44.2)
