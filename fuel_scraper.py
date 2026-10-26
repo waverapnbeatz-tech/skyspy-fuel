@@ -111,51 +111,138 @@ def fuel_record_from_lines(lines: list[str], label: str, now: datetime) -> dict:
     return record(price, d, now)
 
 
-def parse_mbenzin(html: str, now: datetime, expected_address: str) -> tuple[dict, dict]:
-    lines = text_lines(html)
-    first_nearby = next((i for i, s in enumerate(lines) if normalized(s) ==
-                         "cerpaci stanice v okoli"), len(lines))
-    own = lines[:first_nearby]
-    first_fuel = next((i for i, s in enumerate(own) if fuel_label(s) == "Benzín"), len(own))
-    # Check address in the station header, not in nearby station recommendations.
-    header = normalized(" ".join(own[:first_fuel]))
-    if normalized(expected_address) not in header:
-        raise ValueError(f"Nesedí adresa stanice v hlavičce: {expected_address}")
-    return (fuel_record_from_lines(own, "Benzín", now),
-            fuel_record_from_lines(own, "Nafta", now))
+def _station_heading(soup: BeautifulSoup, expected_name: str | None) -> object:
+    """Select the actual detail H1. Never read a similarly named nearby station."""
+    h1s = soup.find_all("h1")
+    if len(h1s) != 1:
+        raise ValueError(f"Detail: očekávána jedna hlavička stanice, nalezeno {len(h1s)}")
+    h1 = h1s[0]
+    if expected_name and normalized(expected_name) not in normalized(h1.get_text(" ", strip=True)):
+        raise ValueError(f"Nesedí název stanice v H1: {expected_name}")
+    return h1
+
+
+def _section_after_heading(heading, now: datetime) -> dict:
+    """Read only text following an exact h2 fuel label up to the next h2.
+
+    This avoids navigation, recommendations and pop-up price hints. Element
+    descendants are skipped in favor of actual text nodes so data is not
+    duplicated. The first plausible price in that section is the listed one.
+    """
+    from bs4.element import NavigableString, Tag
+    chunks = []
+    for node in heading.next_elements:
+        if isinstance(node, Tag) and node.name == "h2":
+            break
+        if isinstance(node, NavigableString):
+            if node.parent and node.parent.name in {"script", "style", "noscript"}:
+                continue
+            v = str(node).strip()
+            if v:
+                chunks.append(v)
+        if len(chunks) > 150:
+            raise ValueError("Neobvykle dlouhá sekce paliva")
+    section = " ".join(chunks)
+    try:
+        price = validate_price(section)
+    except ValueError:
+        return record()
+    return record(price, reported_date(section, now), now)
+
+
+def parse_mbenzin(html: str, now: datetime, expected_address: str,
+                   expected_name: str | None = None) -> tuple[dict, dict]:
+    """Use exact fuel h2 nodes on a station's own detail page.
+
+    mBenzin has many other price strings (nearby stations, discount offers,
+    alerts and popups). Only the labelled main detail sections are accepted.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for el in soup(["script", "style", "noscript"]):
+        el.decompose()
+    station_h1 = _station_heading(soup, expected_name)
+
+    # Verify address within station's own content before nearby suggestions.
+    # Unlike the old code, do not truncate at the first *text* 'Benzín',
+    # which can occur in a navigation badge or price advertisement.
+    page_text = soup.get_text(" ", strip=True)
+    marker = re.search(r"čerpací\s+stanice\s+v\s+okolí", page_text, re.I)
+    own_text = page_text[:marker.start()] if marker else page_text
+    if normalized(expected_address) not in normalized(own_text):
+        raise ValueError(f"Nesedí adresa stanice na detailu: {expected_address}")
+
+    # Heading may be nested inside a main or a layout card; use heading order
+    # rather than text positions. Stop on the nearby-stations heading.
+    headings = soup.find_all("h2")
+    selected = {}
+    seen_h1 = False
+    for heading in soup.find_all(re.compile(r"^h[12]$")):
+        if heading is station_h1:
+            seen_h1 = True
+            continue
+        if not seen_h1 or heading.name != "h2":
+            continue
+        label = normalized(heading.get_text(" ", strip=True))
+        if label == "cerpaci stanice v okoli":
+            break
+        if label in ("benzin", "nafta"):
+            if label in selected:
+                raise ValueError(f"Duplicitní sekce paliva: {label}")
+            selected[label] = _section_after_heading(heading, now)
+    if "benzin" not in selected or "nafta" not in selected:
+        raise ValueError("Na detailu chybí sekce Benzín nebo Nafta")
+    return selected["benzin"], selected["nafta"]
 
 
 def parse_mbenzin_listing(html: str, now: datetime, address: str, station_name: str) -> tuple[dict, dict]:
-    """Safely extract one exact station from the city list, never its neighbor."""
-    lines = text_lines(html)
-    addr = normalized(address)
-    name = normalized(station_name)
-    candidates = [i for i, s in enumerate(lines)
-                  if normalized(s) == addr and name in [normalized(v) for v in lines[max(0, i-4):i]]]
-    if not candidates:
+    """Fallback for exact station rows only; refuses ambiguous matches.
+
+    The city list's brand, address and fuel prices can be separate *or*
+    inline text nodes, depending on the page layout and mobile view.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for el in soup(["script", "style", "noscript", "nav", "footer"]):
+        el.decompose()
+    lines = [x.strip() for x in soup.get_text("\n", strip=True).splitlines() if x.strip()]
+    target_address, target_name = normalized(address), normalized(station_name)
+    # Find address over several consecutive nodes (some layouts split city
+    # and street). Require the brand immediately ahead of the address.
+    possible = []
+    for i in range(len(lines)):
+        for width in (1, 2, 3):
+            if normalized(" ".join(lines[i:i+width])) != target_address:
+                continue
+            brand_positions = [j for j in range(max(0, i-10), i)
+                               if normalized(lines[j]) == target_name]
+            if brand_positions:
+                possible.append((brand_positions[-1], i+width))
+    possible = sorted(set(possible))
+    if len(possible) != 1:
         raise ValueError(f"Stanice {station_name}, {address} není v přehledu jednoznačně nalezena")
-    parsed = []
-    for i in candidates:
-        # Each city's row always ends at 'Premium diesel'. Do not bleed into another row.
-        end = next((j + 1 for j in range(i+1, min(i+46, len(lines)))
-                    if fuel_label(lines[j]) == "Premium diesel"), None)
-        if end is None:
-            continue
-        block = lines[i+1:end]
+
+    # Stop at the next brand card / price table; never consume the next row.
+    brand_at, data_start = possible[0]
+    search_end = min(data_start + 35, len(lines))
+    end = next((j+1 for j in range(data_start, search_end)
+                if fuel_label(lines[j]) == "Premium diesel"), None)
+    if end is None:
+        raise ValueError("Stanice v přehledu: nelze bezpečně určit konec řádku")
+    area = lines[data_start:end]
+    def price_from_listing(label: str) -> dict:
+        positions = [i for i, line in enumerate(area) if fuel_label(line) == label]
+        if len(positions) != 1:
+            return record()
+        i = positions[0]
+        next_label = next((j for j in range(i+1,len(area)) if fuel_label(area[j]) is not None), len(area))
+        snippet = " ".join(area[i:next_label])
         try:
-            b = fuel_record_from_lines(block, "Benzín", now)
-            d = fuel_record_from_lines(block, "Nafta", now)
-            if b["price"] is not None or d["price"] is not None:
-                parsed.append((b, d))
+            return record(validate_price(snippet), reported_date(snippet, now), now)
         except ValueError:
-            continue
-    if not parsed:
+            return record()
+    b, d = price_from_listing("Benzín"), price_from_listing("Nafta")
+    if b["price"] is None and d["price"] is None:
         raise ValueError(f"Stanice {station_name}, {address}: ceny v přehledu nenalezeny")
-    # Repeated blocks are acceptable only if they agree (not mixed station prices).
-    distinct = {(x["price"], y["price"]) for x,y in parsed}
-    if len(distinct) != 1:
-        raise ValueError("Rozdílné ceny stejné stanice ve více sekcích přehledu")
-    return parsed[0]
+    return b, d
 
 
 def parse_ono(html: str, now: datetime) -> tuple[dict, dict]:
@@ -217,7 +304,7 @@ def fetch_station(station: dict, now: datetime, session: requests.Session) -> di
             raise ValueError("Příliš velká odpověď")
         if station["source_kind"] == "mbenzin":
             try:
-                n95, diesel = parse_mbenzin(response.text, now, station["expected_address"])
+                n95, diesel = parse_mbenzin(response.text, now, station["expected_address"], station.get("listing_name"))
                 if n95["price"] is None and diesel["price"] is None:
                     raise ValueError("Detail neobsahuje ceny")
             except ValueError as detail_error:

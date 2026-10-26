@@ -31,6 +31,52 @@ MBENZIN_LISTING = """<html><body><main><h2>Nejbližší</h2>
 </main></body></html>"""
 
 class ParserTests(unittest.TestCase):
+
+    def test_realistic_detail_has_nav_price_before_address(self):
+        html = """<html><body><header><div>Benzín 34,00 a nafta 38,00</div></header>
+        <main><h1>Kontakt – Turnov</h1><p>Ohrazenice</p><h2>Provozní doba</h2>
+        <h2>Benzín</h2><div><strong>43,90 Kč</strong> <span>24.10.2026</span></div>
+        <h2>Nafta</h2><div>46,90 Kč z 18.10.2026 — nemusí být aktuální</div>
+        <h2>Čerpací stanice v okolí</h2><article>Robin Oil Benzín 99,99 Nafta 99,99</article>
+        </main></body></html>"""
+        b, d = parse_mbenzin(html, NOW, 'Ohrazenice', 'Kontakt')
+        self.assertEqual((b['price'],d['price']), (43.9,46.9))
+        self.assertEqual(b['reported_date'],'2026-10-24')
+        self.assertEqual(d['status'],'stale')
+
+    def test_realistic_robinoil_title_and_heading(self):
+        html = """<html><body><header>Benzín</header><h1>Robin Oil – Turnov</h1>
+        <p>Palackého 182</p><h2>Benzín</h2><div>44,50 Kč 24.10.2026</div>
+        <h2>Nafta</h2><div>46,70 Kč 23.10.2026</div>
+        <h2>Premium benzín</h2><div>47,50 Kč</div>
+        <h2>Čerpací stanice v okolí</h2><p>Kontakt</p></body></html>"""
+        b, d = parse_mbenzin(html, NOW, 'Palackého 182', 'Robin Oil')
+        self.assertEqual((b['price'],d['price']), (44.5,46.7))
+        self.assertEqual(d['reported_date'],'2026-10-23')
+
+    def test_address_must_not_come_only_from_nearby(self):
+        html = """<html><h1>Kontakt – Turnov</h1><div>Svobodova 2050</div>
+        <h2>Benzín</h2><p>43,90 Kč 24.10.2026</p><h2>Nafta</h2>
+        <p>46,90 Kč</p><h2>Čerpací stanice v okolí</h2>
+        <p>Turnov, Ohrazenice</p></html>"""
+        with self.assertRaisesRegex(ValueError,'Nesedí adresa'):
+            parse_mbenzin(html, NOW, 'Ohrazenice', 'Kontakt')
+
+    def test_listing_inline_and_split_address(self):
+        html = """<html><main><a>Robin Oil</a><p>Turnov,</p><span>Palackého 182</span>
+        <span>200 m</span><div>Benzín 44,50</div><div>Nafta 46,70 3 dní</div>
+        <div>LPG –</div><div>CNG –</div><div>Premium benzín 47,50</div>
+        <div>Premium diesel –</div>
+        <a>Kontakt</a><p>Turnov, Ohrazenice</p><div>Benzín 43,90</div>
+        <div>Nafta 46,90 8 dní</div><div>LPG 22,90</div><div>CNG –</div>
+        <div>Premium benzín 45,90</div><div>Premium diesel 47,90</div>
+        </main></html>"""
+        b, d = parse_mbenzin_listing(html, NOW, 'Turnov, Palackého 182', 'Robin Oil')
+        self.assertEqual((b['price'],d['price']), (44.5,46.7))
+        b2, d2 = parse_mbenzin_listing(html, NOW, 'Turnov, Ohrazenice', 'Kontakt')
+        self.assertEqual((b2['price'],d2['price']), (43.9,46.9))
+        self.assertEqual(d2['status'],'stale')
+
     def test_ohrazenice_detail_guard(self):
         n95, diesel = parse_mbenzin(MBENZIN_OHRAZENICE, NOW, 'Ohrazenice')
         self.assertEqual(n95['price'], 43.9)

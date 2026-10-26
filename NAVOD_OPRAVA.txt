@@ -1,22 +1,15 @@
-SKYSPY FUEL – OPRAVA OHRAZENICE + NÁHRADNÍ ČTENÍ TURNOVA
+SKYSPY FUEL – oprava parsování mBenzin.cz (26. 10. 2026)
 
-Obsah ZIPu není celý Android projekt. Jsou to 4 změněné soubory sběrače a tento návod.
+V GitHub Desktop otevři Repository -> Show in Explorer.
+Z tohoto ZIPu zkopíruj soubor fuel_scraper.py a složku tests do kořene repozitáře skyspy-fuel.
+Potvrď přepsání původních souborů.
+Zpět v GitHub Desktop: Summary -> "Oprava parsovani mBenzin" -> Commit to main -> Push origin.
+Na GitHubu spusť Actions -> SKYSPY FUEL - aktualizace cen -> Run workflow.
+V https://waverapnbeatz-tech.github.io/skyspy-fuel/prices.json ověř
+u Kontakt Ohrazenice a RobinOil položku error = null a nenulové ceny.
 
-1. ZIP rozbal.
-2. Otevři GitHub Desktop > skyspy-fuel > Repository > Show in Explorer.
-3. Z rozbaleného ZIPu PŘETÁHNI soubory A SLOŽKY do složky skyspy-fuel
-   (nikoliv celou nadřazenou složku ZIPu). Potvrď PŘEPSAT SOUBORY.
-4. V GitHub Desktop klikni Changes, napiš "Oprava Kontakt Ohrazenice"
-   do Summary, klikni Commit to main a Push origin.
-5. Na GitHubu otevři Actions > SKYSPY FUEL – aktualizace cen > Run workflow.
-6. Ověř https://waverapnbeatz-tech.github.io/skyspy-fuel/prices.json
+Konfiguraci stanic tentokrát neměníme. Tank ONO ponecháváme beze změny.
 
-Nová Kontakt stanice: Ohrazenice, Průmyslová 3002, Turnov. ID kontakt_turnov zůstává kvůli kompatibilitě Androidu.
-Její mBenzin detail: https://www.mbenzin.cz/Ceny-benzinu-a-nafty/Turnov/Kontakt-Ohrazenice/17038
-RobinOil zůstává Turnov, Palackého 182. ONO Cvikov beze změny.
-
-Při selhání rozboru detailu mBenzin se zkusí přesně daná stanice
-v přehledu Turnova. Ostatní stanice se nesmějí zaměnit.
-Staré/nezjištěné ceny zůstanou označené, nebudou se vydávat za čerstvé.
-Sběrač nemá garantovaný přístup k externím webům; u chyb nebo blokování
-zobrazí 'nedostupné'. Před prvním nasazením byl ověřen pouze na testech HTML.
+Poznámka: Parser prošel simulovanými offline testy. Skutečný provoz
+na GitHub Actions se musí ověřit po nasazení; aktuální HTML stránky
+se může od testovacích ukázek lišit.
